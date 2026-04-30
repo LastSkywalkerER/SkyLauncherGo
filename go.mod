@@ -5,6 +5,7 @@ go 1.25
 require (
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/wailsapp/wails/v3 v3.0.0-alpha.80
+	golang.org/x/sync v0.19.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
