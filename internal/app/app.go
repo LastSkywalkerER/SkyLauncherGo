@@ -19,6 +19,7 @@ import (
 	"github.com/LastSkywalkerER/SkyLauncherGo/internal/logger"
 	"github.com/LastSkywalkerER/SkyLauncherGo/internal/paths"
 	"github.com/LastSkywalkerER/SkyLauncherGo/internal/progress"
+	"github.com/LastSkywalkerER/SkyLauncherGo/internal/updater"
 )
 
 const (
@@ -66,6 +67,7 @@ func Run(opts Options) error {
 	configSvc := config.NewService(cfg)
 	launchSvc := launcher.NewService(authSvc, instMgr, installSvc)
 	hwSvc := hardware.NewService()
+	updaterSvc := updater.NewService(httpC, bus, opts.Version)
 
 	// progressBridge is a tiny progress.Sink that re-emits events on the
 	// Wails bus so the frontend can subscribe to "process-progress".
@@ -83,6 +85,7 @@ func Run(opts Options) error {
 			application.NewService(cfClient),
 			application.NewService(launchSvc),
 			application.NewService(installSvc),
+			application.NewService(updaterSvc),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.BundledAssetFileServer(opts.Assets),
