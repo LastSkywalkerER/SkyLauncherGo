@@ -1,0 +1,158 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. 1.2.3)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os_label }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os_label: windows-amd64
+            runner: windows-latest
+            goos: windows
+            goarch: amd64
+            ext: .exe
+          - os_label: darwin-universal
+            runner: macos-latest
+            goos: darwin
+            goarch: ""        # universal: built via lipo below
+            ext: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "value=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          else
+            echo "value=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build (windows)
+        if: matrix.goos == 'windows'
+        env:
+          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+          MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
+          UPDATER_PUBLIC_KEY: ${{ secrets.UPDATER_PUBLIC_KEY }}
+          UPDATER_MANIFEST_URL: ${{ secrets.UPDATER_MANIFEST_URL }}
+        shell: bash
+        run: |
+          GOOS=windows GOARCH=amd64 go build \
+            -trimpath \
+            -ldflags "\
+              -s -w \
+              -X 'main.Version=${{ steps.ver.outputs.value }}' \
+              -X 'main.CommitHash=${GITHUB_SHA::7}' \
+              -X 'github.com/LastSkywalkerER/SkyLauncherGo/internal/curseforge.APIKey=${CURSEFORGE_API_KEY}' \
+              -X 'github.com/LastSkywalkerER/SkyLauncherGo/internal/auth.MicrosoftClientID=${MICROSOFT_CLIENT_ID}' \
+              -X 'github.com/LastSkywalkerER/SkyLauncherGo/internal/updater.PublicKey=${UPDATER_PUBLIC_KEY}' \
+              -X 'github.com/LastSkywalkerER/SkyLauncherGo/internal/updater.ManifestURL=${UPDATER_MANIFEST_URL}'" \
+            -o build/bin/SkyLauncher-${{ steps.ver.outputs.value }}-windows-amd64.exe \
+            .
+
+      - name: Build (darwin universal)
+        if: matrix.goos == 'darwin'
+        env:
+          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+          MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
+          UPDATER_PUBLIC_KEY: ${{ secrets.UPDATER_PUBLIC_KEY }}
+          UPDATER_MANIFEST_URL: ${{ secrets.UPDATER_MANIFEST_URL }}
+        run: |
+          mkdir -p build/bin/intermediate
+          for arch in amd64 arm64; do
+            GOOS=darwin GOARCH=$arch CGO_ENABLED=1 go build \
+              -trimpath \
+              -ldflags "\
+                -s -w \
+                -X 'main.Version=${{ steps.ver.outputs.value }}' \
+                -X 'main.CommitHash=${GITHUB_SHA::7}' \
+                -X 'github.com/LastSkywalkerER/SkyLauncherGo/internal/curseforge.APIKey=${CURSEFORGE_API_KEY}' \
+                -X 'github.com/LastSkywalkerER/SkyLauncherGo/internal/auth.MicrosoftClientID=${MICROSOFT_CLIENT_ID}' \
+                -X 'github.com/LastSkywalkerER/SkyLauncherGo/internal/updater.PublicKey=${UPDATER_PUBLIC_KEY}' \
+                -X 'github.com/LastSkywalkerER/SkyLauncherGo/internal/updater.ManifestURL=${UPDATER_MANIFEST_URL}'" \
+              -o build/bin/intermediate/SkyLauncher-$arch \
+              .
+          done
+          lipo -create -output build/bin/SkyLauncher-${{ steps.ver.outputs.value }}-darwin-universal \
+            build/bin/intermediate/SkyLauncher-amd64 \
+            build/bin/intermediate/SkyLauncher-arm64
+          chmod +x build/bin/SkyLauncher-${{ steps.ver.outputs.value }}-darwin-universal
+
+      - name: Sign manifest entry
+        if: env.UPDATER_PRIVATE_KEY != ''
+        env:
+          UPDATER_PRIVATE_KEY: ${{ secrets.UPDATER_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in build/bin/SkyLauncher-${{ steps.ver.outputs.value }}-*; do
+            test -f "$f" || continue
+            sha=$(shasum -a 256 "$f" | awk '{print $1}')
+            sig=$(echo -n "$sha" | openssl pkeyutl -sign -inkey <(echo "$UPDATER_PRIVATE_KEY") -rawin -keyform PEM | base64)
+            echo "$f $sha $sig" >> build/bin/signatures.txt
+          done
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: skylauncher-${{ matrix.os_label }}
+          path: build/bin/SkyLauncher-*
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Compose latest.json
+        env:
+          UPDATER_MANIFEST_TEMPLATE: ${{ secrets.UPDATER_MANIFEST_URL }}
+        run: |
+          ls -la artifacts
+          version="${GITHUB_REF#refs/tags/v}"
+          jq -n --arg v "$version" '{version:$v, releaseDate:(now|todate), notes:"", files:[]}' > latest.json
+          cat latest.json
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*
+            latest.json
