@@ -48,6 +48,16 @@ export function InstancesPage() {
     }
   };
 
+  const handleDelete = async (id: string, name: string) => {
+    if (!window.confirm(`Delete "${name}"? Your saves will be backed up.`)) return;
+    try {
+      await Launcher.delete(id, true);
+      reload();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -96,6 +106,14 @@ export function InstancesPage() {
                   ) : (
                     <Button label="Play" icon="pi pi-play" onClick={() => handleLaunch(it.id)} />
                   )}
+                  <Button
+                    icon="pi pi-trash"
+                    severity="secondary"
+                    outlined
+                    disabled={live}
+                    onClick={() => handleDelete(it.id, it.name)}
+                    aria-label="Delete"
+                  />
                 </div>
               </li>
             );

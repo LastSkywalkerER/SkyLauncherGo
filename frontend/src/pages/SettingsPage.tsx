@@ -2,13 +2,16 @@ import { Button } from "primereact/button";
 import { InputNumber } from "primereact/inputnumber";
 import { useEffect, useState } from "react";
 
-import { Config, Hardware, type AppConfig, type HardwareInfo } from "../wails/bindings";
+import { Config, Hardware, Updater, type AppConfig, type HardwareInfo, type UpdateStatus } from "../wails/bindings";
 
 export function SettingsPage() {
   const [cfg, setCfg] = useState<AppConfig | null>(null);
   const [hw, setHw] = useState<HardwareInfo | null>(null);
   const [memory, setMemory] = useState(4096);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   useEffect(() => {
     Config.get().then((c) => {
@@ -21,6 +24,31 @@ export function SettingsPage() {
   const save = async () => {
     await Config.setJava({ memory, path: cfg?.java.path });
     setSavedAt(Date.now());
+  };
+
+  const checkUpdates = async () => {
+    setUpdateBusy(true);
+    setUpdateError(null);
+    try {
+      setUpdateStatus(await Updater.check());
+    } catch (e) {
+      setUpdateError(String(e));
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
+
+  const applyUpdate = async () => {
+    setUpdateBusy(true);
+    setUpdateError(null);
+    try {
+      await Updater.apply();
+      setUpdateError("Update installed. Restart the launcher to use it.");
+    } catch (e) {
+      setUpdateError(String(e));
+    } finally {
+      setUpdateBusy(false);
+    }
   };
 
   return (
@@ -37,6 +65,30 @@ export function SettingsPage() {
           </ul>
         </section>
       )}
+
+      <section className="space-y-2 rounded-md border border-white/10 p-4">
+        <h2 className="font-semibold">Updates</h2>
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <Button label="Check now" icon="pi pi-refresh" loading={updateBusy} onClick={checkUpdates} />
+          {updateStatus && (
+            <span className="text-white/80">
+              Current: <code>{updateStatus.currentVersion || "dev"}</code> · Latest:{" "}
+              <code>{updateStatus.latestVersion}</code>
+              {updateStatus.updateAvailable && (
+                <Button
+                  label="Install update"
+                  icon="pi pi-download"
+                  className="ml-3"
+                  loading={updateBusy}
+                  onClick={applyUpdate}
+                />
+              )}
+            </span>
+          )}
+        </div>
+        {updateStatus?.notes && <pre className="text-xs text-white/60 whitespace-pre-wrap">{updateStatus.notes}</pre>}
+        {updateError && <div className="rounded-md border border-red-700 bg-red-900/40 p-2 text-sm">{updateError}</div>}
+      </section>
 
       <section className="space-y-2">
         <label className="text-sm">JVM heap (MB)</label>

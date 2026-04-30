@@ -132,6 +132,11 @@ func (s *Service) Stop(ctx context.Context, instanceID string) error {
 	return s.Instances.Stop(ctx, instanceID)
 }
 
+// Delete removes an instance (with optional save backup).
+func (s *Service) Delete(instanceID string, keepWorlds bool) error {
+	return s.Instances.Delete(instanceID, keepWorlds)
+}
+
 // List returns every instance descriptor (recently-played first).
 func (s *Service) List() ([]instances.Instance, error) {
 	return s.Instances.List()

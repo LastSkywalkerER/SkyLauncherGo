@@ -150,4 +150,18 @@ export const Launcher = {
   }) => launch<Instance>("CreateAndInstall", req),
   launch: (id: string) => launch<void>("Launch", id),
   stop: (id: string) => launch<void>("Stop", id),
+  delete: (id: string, keepWorlds: boolean) => launch<void>("Delete", id, keepWorlds),
+};
+
+export interface UpdateStatus {
+  currentVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+  notes?: string;
+}
+
+const upd = callerFor("updater", "Service");
+export const Updater = {
+  check: () => upd<UpdateStatus>("Check"),
+  apply: () => upd<void>("Apply"),
 };
